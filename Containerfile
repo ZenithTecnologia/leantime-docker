@@ -1,0 +1,62 @@
+FROM registry.access.redhat.com/ubi9/php-82:latest AS leantime-src
+
+ARG BRANCH=develop
+
+USER 0
+RUN dnf --setopt=install_weak_deps=0 --noplugins --nodocs -y install git-core
+USER 1001
+RUN git clone --single-branch --depth=1 --branch=${BRANCH} https://github.com/Leantime/leantime.git /tmp/leantime
+
+# -- Build node modules
+FROM registry.access.redhat.com/ubi9/nodejs-22-minimal:latest AS nodejs-build
+COPY --from=leantime-src --chown=1001:1001 /tmp/leantime /tmp/leantime
+
+WORKDIR /tmp/leantime
+
+RUN npm install
+
+# -- Assemble built package
+FROM registry.access.redhat.com/ubi9/php-82:latest AS php-prepare
+
+USER 0
+RUN dnf install -y curl-minimal unzip
+USER 1001
+COPY --from=nodejs-build --chown=1001:1001 /tmp/leantime /tmp/leantime
+
+RUN mkdir /tmp/php.d && \
+  echo -e '[global]\nmemory_limit = 512M\npost_max_size = 4096M\nupload_max_size = 4096M\nmax_execution_time = 1800' > /tmp/php.d/leantime.ini && \
+  echo -e '[global]\nerror_reporting = E_ALL & ~E_DEPRECATED & ~E_STRICT\nlog_errors = 1\ndisplay_errors = 0' > /tmp/php.d/docker-log.ini
+
+RUN git config --global --add safe.directory /tmp/leantime
+
+RUN mkdir /tmp/composer_temp \
+ && cd /tmp/composer_temp \
+ && curl -sSLo- https://getcomposer.org/installer | php \
+ && cd /tmp/leantime \
+ && php /tmp/composer_temp/composer.phar update --no-dev --optimize-autoloader \
+
+# -- PHP runtime
+
+FROM registry.access.redhat.com/ubi9/php-82:latest AS php-assemble
+COPY --from=php-prepare --chown=1001:1001 /tmp/leantime /tmp/src
+COPY --from=php-prepare --chown=1001:1001 /tmp/php.d /etc/php.d
+
+RUN cat <<EOF >> /opt/app-root/src/.htaccess 
+<IfModule mod_headers.c>
+  Header set Strict-Transport-Security "max-age=31536000" env=HTTPS
+  Header always set X-Frame-Options "SAMEORIGIN"
+  Header setifempty Referrer-Policy: same-origin
+  Header set X-XSS-Protection "1; mode=block"
+  Header set X-Permitted-Cross-Domain-Policies "none"
+  Header set Referrer-Policy "no-referrer"
+  Header set X-Content-Type-Options: nosniff
+  ServerSignature Off
+</IfModule>
+EOF
+
+RUN /usr/libexec/s2i/assemble
+
+FROM registry.access.redhat.com/ubi9/php-82:latest AS runtime
+COPY --from=php-assemble /opt /opt
+
+CMD [ "/usr/libexec/s2i/run" ]

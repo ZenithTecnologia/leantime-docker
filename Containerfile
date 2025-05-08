@@ -1,14 +1,19 @@
 FROM registry.access.redhat.com/ubi9/php-82:latest AS leantime-src
 
-ARG BRANCH=develop
 
 USER 0
 RUN dnf --setopt=install_weak_deps=0 --noplugins --nodocs -y install git-core
 USER 1001
-RUN git clone --single-branch --depth=1 --branch=${BRANCH} https://github.com/Leantime/leantime.git /tmp/leantime
+
+ARG BRANCH=develop
+
+RUN git clone https://github.com/Leantime/leantime.git /tmp/leantime \
+ && cd /tmp/leantime \
+ && git checkout -b ${BRANCH} tags/${BRANCH} \
+ && git show --summary
 
 # -- Build node modules
-FROM registry.access.redhat.com/ubi9/nodejs-22-minimal:latest AS nodejs-build
+FROM registry.access.redhat.com/ubi9/nodejs-22-minimal:latest AS nodejs-step1
 COPY --from=leantime-src --chown=1001:1001 /tmp/leantime /tmp/leantime
 
 WORKDIR /tmp/leantime
@@ -21,7 +26,7 @@ FROM registry.access.redhat.com/ubi9/php-82:latest AS php-prepare
 USER 0
 RUN dnf install -y curl-minimal unzip
 USER 1001
-COPY --from=nodejs-build --chown=1001:1001 /tmp/leantime /tmp/leantime
+COPY --from=nodejs-step1 --chown=1001:1001 /tmp/leantime /tmp/leantime
 
 RUN mkdir /tmp/php.d && \
   echo -e '[global]\nmemory_limit = 512M\npost_max_size = 4096M\nupload_max_size = 4096M\nmax_execution_time = 1800' > /tmp/php.d/leantime.ini && \
@@ -31,14 +36,27 @@ RUN git config --global --add safe.directory /tmp/leantime
 
 RUN mkdir /tmp/composer_temp \
  && cd /tmp/composer_temp \
- && curl -sSLo- https://getcomposer.org/installer | php \
- && cd /tmp/leantime \
- && php /tmp/composer_temp/composer.phar update --no-dev --optimize-autoloader \
+ && curl -sSLo- https://getcomposer.org/installer | php
+
+RUN cd /tmp/leantime \
+ && php /tmp/composer_temp/composer.phar install --no-dev --optimize-autoloader
+
+# -- Build node modules - p2
+FROM nodejs-step1 AS nodejs-step2
+RUN rm -rf /tmp/leantime
+COPY --from=php-prepare --chown=1001:1001 /tmp/leantime /tmp/leantime
+
+WORKDIR /tmp/leantime
+
+RUN npx update-browserslist-db@latest --production
+RUN npx mix --production
+RUN node generateBlocklist.mjs
 
 # -- PHP runtime
 
 FROM registry.access.redhat.com/ubi9/php-82:latest AS php-assemble
-COPY --from=php-prepare --chown=1001:1001 /tmp/leantime /tmp/src
+
+COPY --from=nodejs-step2 --chown=1001:1001 /tmp/leantime /tmp/src
 COPY --from=php-prepare --chown=1001:1001 /tmp/php.d /etc/php.d
 
 RUN cat <<EOF >> /opt/app-root/src/.htaccess 
@@ -53,6 +71,8 @@ RUN cat <<EOF >> /opt/app-root/src/.htaccess
   ServerSignature Off
 </IfModule>
 EOF
+
+RUN rm -f /tmp/src/composer.json composer.lock
 
 RUN /usr/libexec/s2i/assemble
 

@@ -10,7 +10,7 @@ ARG BRANCH=develop
 RUN git clone https://github.com/Leantime/leantime.git /tmp/leantime \
  && cd /tmp/leantime \
  && git fetch --tags --all \
- && git checkout tags/${BRANCH} \
+ && git checkout ${BRANCH} \
  && git checkout -b ${BRANCH} \
  && git show --summary
 

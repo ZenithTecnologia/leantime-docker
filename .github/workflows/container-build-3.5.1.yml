@@ -1,15 +1,15 @@
-name: "[CI] Upstream v3.5.0"
+name: "[CI] Upstream v3.5.1"
 
 on:
   push:
     paths:
       - 'Containerfile'
-      - '.github/workflows/container-build-3.5.0.yml'
+      - '.github/workflows/container-build-3.5.1.yml'
   schedule:
     - cron: '42 2 * * 6'
 
 env:
-  UPSTREAM_BRANCH: v3.5.0
+  UPSTREAM_BRANCH: v3.5.1
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 
@@ -22,6 +22,7 @@ jobs:
         platform:
           - linux/amd64
           - linux/arm64
+          - linux/arm/v8
     steps:
       - name: set lower case image_name
         run: |

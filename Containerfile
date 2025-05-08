@@ -60,8 +60,7 @@ FROM registry.access.redhat.com/ubi9/php-82:latest AS php-assemble
 
 COPY --from=nodejs-step2 --chown=1001:1001 /tmp/leantime /tmp/src
 COPY --from=php-prepare --chown=1001:1001 /tmp/php.d /etc/php.d
-COPY --chown=1001:1001 extra_root/health.php /tmp/src/health.php
-COPY --chown=1001:1001 extra_root/null /tmp/src/null
+COPY --chown=1001:1001 extra_root/ /tmp/src/
 
 RUN cat <<EOF >> /opt/app-root/src/.htaccess 
 <IfModule mod_headers.c>

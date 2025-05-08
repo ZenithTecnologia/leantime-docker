@@ -22,7 +22,6 @@ jobs:
         platform:
           - linux/amd64
           - linux/arm64
-          - linux/arm/v8
     steps:
       - name: set lower case image_name
         run: |
